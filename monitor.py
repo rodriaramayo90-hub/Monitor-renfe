@@ -211,7 +211,8 @@ def accept_calendar(page):
             pass
 
 def verify_departure_date(page, target):
-    expected = target.strftime("%d/%m/%Y")
+    expected_long = target.strftime("%d/%m/%Y")
+    expected_short = target.strftime("%d/%m/%y")
     fields = [
         page.locator('input[aria-label^="Fecha ida"]'),
         page.locator('input[aria-label*="Fecha ida"]'),
@@ -230,11 +231,18 @@ def verify_departure_date(page, target):
                 except Exception:
                     value = ""
                 seen.append(f"{aria} {value}".strip())
-                if expected in aria or expected in value:
+                if (
+                    expected_long in aria
+                    or expected_long in value
+                    or expected_short in aria
+                    or expected_short in value
+                ):
                     return
         except Exception:
             pass
-    raise RuntimeError(f"Renfe no dejó seleccionada la fecha {expected}. Valores vistos: {seen}")
+    raise RuntimeError(
+        f"Renfe no dejó seleccionada la fecha {expected_long}. Valores vistos: {seen}"
+    )
 
 
 def set_date(page, iso_date):
