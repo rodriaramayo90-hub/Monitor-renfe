@@ -50,34 +50,71 @@ def close_cookies(page):
         page.wait_for_timeout(500)
 
 
+def station_is_selected(page, field_name):
+    suffix = "Origen" if re.search("origen", field_name, re.I) else "Destino"
+    try:
+        state = page.evaluate("""(suffix) => {
+            const desc = document.querySelector('[name="des' + suffix + '"]');
+            const code = document.querySelector('[name="cdgo' + suffix + '"]');
+            return {
+                description: desc ? desc.value : '',
+                code: code ? code.value : ''
+            };
+        }""", suffix)
+        print(f"Estado estación {suffix}:", json.dumps(state, ensure_ascii=False))
+        return bool((state.get("description") or "").strip() and (state.get("code") or "").strip())
+    except Exception:
+        return False
+
+
 def choose_station(page, field_name, station):
-    box=page.get_by_role("combobox",name=re.compile(field_name,re.I)).first
-    last_error=None
-    for attempt in range(4):
+    box = page.get_by_role("combobox", name=re.compile(field_name, re.I)).first
+    last_error = None
+
+    for attempt in range(5):
         try:
             box.click(timeout=5000)
             box.fill("")
             box.fill(station)
-            page.wait_for_timeout(1000 + attempt * 700)
-            opt=page.get_by_role("option",name=re.compile(re.escape(station),re.I))
-            for i in range(opt.count()):
-                if opt.nth(i).is_visible():
-                    opt.nth(i).click(timeout=5000)
+            page.wait_for_timeout(1200 + attempt * 600)
+
+            candidates = [
+                page.get_by_role("option", name=re.compile(re.escape(station), re.I)),
+                page.get_by_role("button", name=re.compile(rf"^\\s*{re.escape(station)}(?:\\s*\\(TODAS\\))?\\s*$", re.I)),
+                page.get_by_text(re.compile(rf"^\\s*{re.escape(station)}(?:\\s*\\(TODAS\\))?\\s*$", re.I)),
+            ]
+
+            clicked = False
+            for loc in candidates:
+                for i in range(loc.count()):
+                    try:
+                        item = loc.nth(i)
+                        if item.is_visible():
+                            item.click(timeout=5000)
+                            clicked = True
+                            page.wait_for_timeout(600)
+                            if station_is_selected(page, field_name):
+                                return
+                    except Exception as e:
+                        last_error = e
+
+            # Keyboard fallback, but only accept it if Renfe populated the
+            # hidden station description/code fields.
+            if not clicked:
+                box.press("ArrowDown")
+                box.press("Enter")
+                page.wait_for_timeout(600)
+                if station_is_selected(page, field_name):
                     return
-            txt=page.get_by_text(re.compile(rf"^\s*{re.escape(station)}(?:\s*\(TODAS\))?\s*$",re.I))
-            for i in range(txt.count()):
-                if txt.nth(i).is_visible():
-                    txt.nth(i).click(timeout=5000)
-                    return
-            box.press("ArrowDown")
-            box.press("Enter")
-            page.wait_for_timeout(400)
-            if box.input_value().strip():
-                return
+
         except Exception as e:
-            last_error=e
-            page.wait_for_timeout(700)
-    raise RuntimeError(f"No pude seleccionar {field_name}={station}: {last_error}")
+            last_error = e
+
+        page.wait_for_timeout(700)
+
+    raise RuntimeError(
+        f"No pude seleccionar una estación válida para {field_name}={station}: {last_error}"
+    )
 
 def open_departure_calendar(page):
     candidates = [
@@ -210,6 +247,30 @@ def accept_calendar(page):
         except Exception:
             pass
 
+def sync_hidden_departure_date(page, target):
+    value = target.strftime("%d/%m/%Y")
+    result = page.evaluate("""(value) => {
+        const names = ['FechaIdaSel', '_fechaIdaVisual'];
+        const changed = {};
+        for (const name of names) {
+            const el = document.querySelector('[name="' + name + '"]');
+            if (!el) {
+                changed[name] = null;
+                continue;
+            }
+            el.value = value;
+            el.setAttribute('value', value);
+            el.dispatchEvent(new Event('input', {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            changed[name] = el.value;
+        }
+        return changed;
+    }""", value)
+    print("Fecha interna sincronizada:", json.dumps(result, ensure_ascii=False))
+    if result.get("FechaIdaSel") != value or result.get("_fechaIdaVisual") != value:
+        raise RuntimeError(f"No pude sincronizar la fecha interna de Renfe a {value}")
+
+
 def verify_departure_date(page, target):
     expected_long = target.strftime("%d/%m/%Y")
     expected_short = target.strftime("%d/%m/%y")
@@ -256,6 +317,7 @@ def set_date(page, iso_date):
             # the selected date to the booking form.
             accept_calendar(page)
             verify_departure_date(page, target)
+            sync_hidden_departure_date(page, target)
             return
 
         next_buttons = [
@@ -425,7 +487,13 @@ def run():
             set_passengers(page,int(cfg["passengers"]))
 
             # Fail before searching if Renfe silently kept its default date/mode.
-            verify_departure_date(page, datetime.strptime(cfg["date"], "%Y-%m-%d"))
+            target_date = datetime.strptime(cfg["date"], "%Y-%m-%d")
+            verify_departure_date(page, target_date)
+            sync_hidden_departure_date(page, target_date)
+            if not station_is_selected(page, "Origen"):
+                raise RuntimeError("Renfe no dejó seleccionado un origen válido")
+            if not station_is_selected(page, "Destino"):
+                raise RuntimeError("Renfe no dejó seleccionado un destino válido")
             if not one_way_is_selected(page):
                 raise RuntimeError("Renfe no dejó activado 'Viaje solo ida'")
 
