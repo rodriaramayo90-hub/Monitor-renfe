@@ -2,6 +2,14 @@ name: Monitor Renfe
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "monitor.py"
+      - "config.json"
+      - "requirements.txt"
+      - ".github/workflows/monitor.yml"
   schedule:
     - cron: "*/5 * * * *"
 
