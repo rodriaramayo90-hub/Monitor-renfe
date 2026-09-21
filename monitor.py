@@ -2,7 +2,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -170,29 +170,30 @@ def _click_target_day_if_visible(page, target):
     if not _calendar_has_target_month(page, target):
         return False
 
-    day_pat = re.compile(rf"^\\s*{target.day}\\s*$")
-    candidates = [
-        page.locator(".lightpick__cell").filter(has_text=day_pat),
-        page.locator(".lightpick__day").filter(has_text=day_pat),
-        page.get_by_text(day_pat),
-    ]
+    # Renfe Lightpick day cells expose the UTC-midnight timestamp in data-time.
+    # This is much safer than matching the visible day number because Renfe shows
+    # two months side by side.
+    target_ms = int(
+        target.replace(tzinfo=timezone.utc).timestamp() * 1000
+    )
+    selector = f'div.lightpick__day.is-available[data-time="{target_ms}"]'
+    cell = page.locator(selector)
 
-    for loc in candidates:
-        try:
-            for i in range(loc.count()):
-                item = loc.nth(i)
-                if not item.is_visible():
-                    continue
-                cls = (item.get_attribute("class") or "").lower()
-                if "disabled" in cls or "other-month" in cls:
-                    continue
-                item.click(timeout=3000)
-                page.wait_for_timeout(250)
-                return True
-        except Exception:
-            pass
+    try:
+        for i in range(cell.count()):
+            item = cell.nth(i)
+            if not item.is_visible():
+                continue
+            print("Fecha objetivo encontrada:", selector)
+            item.click(timeout=4000)
+            page.wait_for_timeout(350)
+            cls = item.get_attribute("class") or ""
+            print("Clase fecha tras click:", cls)
+            return True
+    except Exception as e:
+        print("AVISO click fecha exacta:", repr(e))
+
     return False
-
 
 def accept_calendar(page):
     candidates = [
