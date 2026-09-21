@@ -149,50 +149,66 @@ def set_one_way(page):
         raise RuntimeError("No pude activar 'Viaje solo ida' en el calendario de Renfe")
 
 
+def _calendar_has_target_month(page, target):
+    month_names = {
+        1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
+        5: "mayo", 6: "junio", 7: "julio", 8: "agosto",
+        9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre",
+    }
+    pat = re.compile(rf"{month_names[target.month]}\\s*{target.year}", re.I)
+    loc = page.get_by_text(pat)
+    for i in range(loc.count()):
+        try:
+            if loc.nth(i).is_visible():
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _click_target_day_if_visible(page, target):
-    payload = {"day": target.day, "month": target.month, "year": target.year}
-    return bool(page.evaluate("""(t) => {
-        const pad = n => String(n).padStart(2, '0');
-        const wantedIso = `${t.year}-${pad(t.month)}-${pad(t.day)}`;
-        const wantedEs = `${pad(t.day)}/${pad(t.month)}/${t.year}`;
-        const wantedMs = new Date(t.year, t.month - 1, t.day).getTime();
-        const cells = [...document.querySelectorAll('.lightpick__cell, .lightpick__day')];
+    if not _calendar_has_target_month(page, target):
+        return False
 
-        // Best case: Renfe/Lightpick exposes an exact date attribute.
-        for (const c of cells) {
-            if (c.offsetParent === null) continue;
-            const attrs = [
-                c.getAttribute('data-date') || '',
-                c.getAttribute('aria-label') || '',
-                c.getAttribute('title') || '',
-                c.getAttribute('datetime') || ''
-            ].join(' ');
-            const dataTime = Number(c.getAttribute('data-time'));
-            if (attrs.includes(wantedIso) || attrs.includes(wantedEs) || dataTime === wantedMs) {
-                c.click();
-                return true;
-            }
-        }
+    day_pat = re.compile(rf"^\\s*{target.day}\\s*$")
+    candidates = [
+        page.locator(".lightpick__cell").filter(has_text=day_pat),
+        page.locator(".lightpick__day").filter(has_text=day_pat),
+        page.get_by_text(day_pat),
+    ]
 
-        // Fallback for the current visible target month.
-        const monthNames = ['enero','febrero','marzo','abril','mayo','junio',
-                            'julio','agosto','septiembre','octubre','noviembre','diciembre'];
-        const calendar = document.querySelector('.lightpick') || document.body;
-        const calendarText = (calendar.innerText || '').toLowerCase();
-        if (!calendarText.includes(monthNames[t.month - 1]) || !calendarText.includes(String(t.year))) {
-            return false;
-        }
-        for (const c of cells) {
-            if (c.offsetParent === null) continue;
-            if ((c.textContent || '').trim() !== String(t.day)) continue;
-            const cls = String(c.className || '').toLowerCase();
-            if (cls.includes('disabled') || cls.includes('other-month')) continue;
-            c.click();
-            return true;
-        }
-        return false;
-    }""", payload))
+    for loc in candidates:
+        try:
+            for i in range(loc.count()):
+                item = loc.nth(i)
+                if not item.is_visible():
+                    continue
+                cls = (item.get_attribute("class") or "").lower()
+                if "disabled" in cls or "other-month" in cls:
+                    continue
+                item.click(timeout=3000)
+                page.wait_for_timeout(250)
+                return True
+        except Exception:
+            pass
+    return False
 
+
+def accept_calendar(page):
+    candidates = [
+        page.get_by_role("button", name=re.compile(r"^\\s*Aceptar\\s*$", re.I)),
+        page.get_by_text(re.compile(r"^\\s*Aceptar\\s*$", re.I)),
+    ]
+    for loc in candidates:
+        try:
+            for i in range(loc.count()):
+                item = loc.nth(i)
+                if item.is_visible():
+                    item.click(timeout=3000)
+                    page.wait_for_timeout(300)
+                    return
+        except Exception:
+            pass
 
 def verify_departure_date(page, target):
     expected = target.strftime("%d/%m/%Y")
@@ -228,7 +244,9 @@ def set_date(page, iso_date):
     # Try the currently rendered month first, then advance month by month.
     for _ in range(18):
         if _click_target_day_if_visible(page, target):
-            page.wait_for_timeout(350)
+            # Renfe's calendar uses an explicit "Aceptar" action to commit
+            # the selected date to the booking form.
+            accept_calendar(page)
             verify_departure_date(page, target)
             return
 
