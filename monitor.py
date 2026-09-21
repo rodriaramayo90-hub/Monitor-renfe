@@ -383,46 +383,100 @@ def capture_form_state(page):
         json.dumps(state, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
-    print("FORM_STATE:", json.dumps(state, ensure_ascii=False))
+    summary = {}
+    if state:
+        wanted = {"desOrigen", "desDestino", "cdgoOrigen", "cdgoDestino", "FechaIdaSel", "FechaVueltaSel", "_fechaIdaVisual"}
+        summary = {
+            f.get("name"): f.get("value")
+            for f in state[0].get("fields", [])
+            if f.get("name") in wanted
+        }
+    print("FORM_STATE_RESUMEN:", json.dumps(summary, ensure_ascii=False))
     return state
 
 
+def verify_results_date(body, cfg):
+    target = datetime.strptime(cfg["date"], "%Y-%m-%d")
+    weekdays = [
+        "lunes", "martes", "miércoles", "jueves",
+        "viernes", "sábado", "domingo"
+    ]
+    months = [
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+    ]
+    expected = f"{weekdays[target.weekday()]} {target.day} {months[target.month - 1]}"
+    if not re.search(re.escape(expected), body, re.I):
+        raise RuntimeError(
+            f"La página de resultados no corresponde a {cfg['date']} "
+            f"(esperaba encontrar '{expected}')"
+        )
+    print("Fecha de resultados verificada:", expected)
+
+
 def parse_results_text(body,cfg):
-    # Renfe result pages vary often. Work from rendered visible text instead of fragile CSS.
-    time_re=re.compile(r"(?<!\d)([01]\d|2[0-3]):[0-5]\d(?:\s*h)?")
-    lines=[re.sub(r"\s+"," ",x).strip() for x in body.splitlines() if x.strip()]
-    start,end=mins(cfg["time_from"]),mins(cfg["time_to"])
-    trains={}
-    for i,line in enumerate(lines):
-        matches=list(time_re.finditer(line))
-        # Often departure/arrival are on separate lines, so inspect a local window.
-        window="\n".join(lines[max(0,i-4):min(len(lines),i+12)])
-        times=[m.group(0).replace(" h","") for m in time_re.finditer(window)]
-        unique=[]
-        for t in times:
-            if t not in unique: unique.append(t)
-        if len(unique)<2: continue
-        # A text window can contain more than one train. Pick the first time
-        # inside the requested departure range, then the next time as arrival.
-        dep_index=None
-        for j,t in enumerate(unique):
-            try:
-                if start<=mins(t)<=end:
-                    dep_index=j
-                    break
-            except Exception:
-                pass
-        if dep_index is None or dep_index+1>=len(unique):
+    # On Renfe's rendered results page, each train is represented by:
+    # departure time -> duration -> arrival time -> price/features.
+    # Pair exact standalone HH:MM h lines in order, instead of using overlapping
+    # windows that can mix one train's arrival with the next train's departure.
+    lines = [re.sub(r"\s+", " ", x).strip() for x in body.splitlines() if x.strip()]
+    exact_time = re.compile(r"^([01]\d|2[0-3]):[0-5]\d\s*h$")
+    time_positions = []
+
+    for idx, line in enumerate(lines):
+        m = exact_time.fullmatch(line)
+        if m:
+            time_positions.append((idx, line.replace(" h", "")))
+
+    start_min, end_min = mins(cfg["time_from"]), mins(cfg["time_to"])
+    trains = []
+
+    i = 0
+    while i + 1 < len(time_positions):
+        dep_idx, dep = time_positions[i]
+        arr_idx, arr = time_positions[i + 1]
+
+        # A real train pair has a duration between departure and arrival.
+        between = " ".join(lines[dep_idx + 1:arr_idx])
+        if not re.search(r"\b(?:hora|horas|minuto|minutos)\b", between, re.I):
+            i += 1
             continue
-        dep,arr=unique[dep_index],unique[dep_index+1]
-        if not re.search(r"€|precio|plaza|disponible|completo|agotad|desde",window,re.I): continue
-        price=None
-        pm=re.search(r"(\d+(?:[.,]\d{1,2})?)\s*€",window)
-        if pm: price=pm.group(1).replace(",",".")+" €"
-        unavailable=bool(re.search(r"solo plaza h disponible|agotad[oa]|completo|no disponible",window,re.I))
-        available=bool((price or re.search(r"precio|desde",window,re.I)) and not unavailable)
-        trains[(dep,arr)]={"departure":dep,"arrival":arr,"price":price,"available":available,"text":window[:900]}
-    return list(trains.values())
+
+        next_dep_idx = time_positions[i + 2][0] if i + 2 < len(time_positions) else len(lines)
+        segment_lines = lines[dep_idx:next_dep_idx]
+        segment = "\n".join(segment_lines)
+
+        try:
+            dep_minutes = mins(dep)
+        except Exception:
+            i += 2
+            continue
+
+        if start_min <= dep_minutes <= end_min:
+            price = None
+            pm = re.search(r"(\d+(?:[.,]\d{1,2})?)\s*€", segment)
+            if pm:
+                price = pm.group(1).replace(",", ".") + " €"
+
+            unavailable = bool(re.search(
+                r"agotad[oa]|completo|no disponible|sin plazas",
+                segment,
+                re.I
+            ))
+            available = bool(price and not unavailable)
+
+            trains.append({
+                "departure": dep,
+                "arrival": arr,
+                "price": price,
+                "available": available,
+                "text": segment[:1200],
+            })
+
+        i += 2
+
+    return trains
+
 
 
 def save_debug(page,body):
@@ -466,8 +520,17 @@ def run():
                     "resource_type": req.resource_type,
                     "post_data": req.post_data,
                 }
-                captured_requests.append(item)
-                if req.method.upper() != "GET" or "venta.renfe.com" in url.lower():
+                interesting = (
+                    req.method.upper() != "GET"
+                    or "buscartrenenlaces.do" in url.lower()
+                    or "vhi_pricecalendar" in url.lower()
+                )
+                if interesting:
+                    captured_requests.append(item)
+                if (
+                    "buscartren.do" in url.lower()
+                    or "vhi_pricecalendar" in url.lower()
+                ):
                     print("RENFE_REQUEST:", json.dumps(item, ensure_ascii=False))
             except Exception as e:
                 print("AVISO captura request:", repr(e))
@@ -516,6 +579,7 @@ def run():
             save_debug(page,body)
             if "Access Denied" in body or "403" in body[:500]:
                 raise RuntimeError("Renfe parece bloquear la IP del runner")
+            verify_results_date(body, cfg)
             trains=parse_results_text(body,cfg)
             print("Trenes detectados en franja:",json.dumps(trains,ensure_ascii=False,indent=2))
             if not trains:
