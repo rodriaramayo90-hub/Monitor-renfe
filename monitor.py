@@ -42,12 +42,32 @@ def close_cookies(page):
 
 def choose_station(page, field_name, station):
     box=page.get_by_role("combobox",name=re.compile(field_name,re.I)).first
-    box.click(); box.fill(station); page.wait_for_timeout(700)
-    opt=page.get_by_role("option",name=re.compile(re.escape(station),re.I))
-    if opt.count():
-        opt.first.click(); return
-    page.get_by_text(re.compile(rf"^\s*{re.escape(station)}(?:\s*\(TODAS\))?\s*$",re.I)).first.click()
-
+    last_error=None
+    for attempt in range(4):
+        try:
+            box.click(timeout=5000)
+            box.fill("")
+            box.fill(station)
+            page.wait_for_timeout(1000 + attempt * 700)
+            opt=page.get_by_role("option",name=re.compile(re.escape(station),re.I))
+            for i in range(opt.count()):
+                if opt.nth(i).is_visible():
+                    opt.nth(i).click(timeout=5000)
+                    return
+            txt=page.get_by_text(re.compile(rf"^\s*{re.escape(station)}(?:\s*\(TODAS\))?\s*$",re.I))
+            for i in range(txt.count()):
+                if txt.nth(i).is_visible():
+                    txt.nth(i).click(timeout=5000)
+                    return
+            box.press("ArrowDown")
+            box.press("Enter")
+            page.wait_for_timeout(400)
+            if box.input_value().strip():
+                return
+        except Exception as e:
+            last_error=e
+            page.wait_for_timeout(700)
+    raise RuntimeError(f"No pude seleccionar {field_name}={station}: {last_error}")
 
 def set_one_way(page):
     try:
