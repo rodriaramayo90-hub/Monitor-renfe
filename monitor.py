@@ -285,24 +285,6 @@ def set_passengers(page, n):
         print("AVISO pasajeros:",e)
 
 
-def set_date(page, iso_date):
-    target=datetime.strptime(iso_date,"%Y-%m-%d")
-    page.get_by_text(re.compile("Fecha ida",re.I)).first.click(timeout=5000)
-    month_names={1:"enero",2:"febrero",3:"marzo",4:"abril",5:"mayo",6:"junio",7:"julio",8:"agosto",9:"septiembre",10:"octubre",11:"noviembre",12:"diciembre"}
-    pats=[re.compile(rf"{target.day}.*{month_names[target.month]}.*{target.year}",re.I),
-          re.compile(rf"{target.day}\s+{month_names[target.month]}",re.I)]
-    for _ in range(14):
-        for pat in pats:
-            for loc in [page.get_by_role("button",name=pat),page.get_by_text(pat)]:
-                if loc.count():
-                    try: loc.first.click(timeout=1500); return
-                    except Exception: pass
-        nxt=page.locator('button[aria-label*="iguiente" i],button[title*="iguiente" i]')
-        if not nxt.count(): break
-        nxt.last.click(); page.wait_for_timeout(300)
-    raise RuntimeError(f"No pude seleccionar fecha {iso_date}")
-
-
 def parse_results_text(body,cfg):
     # Renfe result pages vary often. Work from rendered visible text instead of fragile CSS.
     time_re=re.compile(r"(?<!\d)([01]\d|2[0-3]):[0-5]\d(?:\s*h)?")
