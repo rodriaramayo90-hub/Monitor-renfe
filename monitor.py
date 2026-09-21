@@ -31,13 +31,23 @@ def mins(hhmm):
 
 
 def close_cookies(page):
-    for label in ["Permitir solo cookies técnicas","Rechazar","Aceptar todas las cookies"]:
-        try:
-            b=page.get_by_role("button",name=label)
-            if b.count():
-                b.first.click(timeout=2500); return
-        except Exception:
-            pass
+    # The CMP can appear a little after DOMContentLoaded, so try a few times.
+    labels = [
+        re.compile(r"Rechazar todas", re.I),
+        re.compile(r"Permitir solo cookies técnicas", re.I),
+        re.compile(r"Aceptar todas las cookies", re.I),
+    ]
+    for _ in range(4):
+        for label in labels:
+            try:
+                b = page.get_by_role("button", name=label)
+                for i in range(b.count()):
+                    if b.nth(i).is_visible():
+                        b.nth(i).click(timeout=2500)
+                        return
+            except Exception:
+                pass
+        page.wait_for_timeout(500)
 
 
 def choose_station(page, field_name, station):
@@ -69,16 +79,182 @@ def choose_station(page, field_name, station):
             page.wait_for_timeout(700)
     raise RuntimeError(f"No pude seleccionar {field_name}={station}: {last_error}")
 
-def set_one_way(page):
-    try:
-        page.get_by_text(re.compile("Viaje solo ida",re.I)).first.click(timeout=3000)
-    except Exception:
+def open_departure_calendar(page):
+    candidates = [
+        page.locator('input[aria-label^="Fecha ida"]'),
+        page.locator('input[aria-label*="Fecha ida"]'),
+        page.locator('input.lightpick__field').first,
+        page.get_by_text(re.compile(r"^\\s*Fecha ida\\s*$", re.I)),
+    ]
+    last_error = None
+    for loc in candidates:
         try:
-            page.get_by_role("button",name=re.compile("Fecha ida",re.I)).first.click()
-            page.get_by_text(re.compile("Viaje solo ida",re.I)).first.click(timeout=3000)
+            count = loc.count()
+            for i in range(count):
+                item = loc.nth(i)
+                if item.is_visible():
+                    item.click(timeout=4000)
+                    page.wait_for_timeout(350)
+                    return item
+        except Exception as e:
+            last_error = e
+    raise RuntimeError(f"No pude abrir el calendario de Fecha ida: {last_error}")
+
+
+def one_way_is_selected(page):
+    try:
+        return bool(page.evaluate("""() => {
+            const radios = [...document.querySelectorAll('input.lightpick__radio')];
+            return radios.some(r => {
+                if (!r.checked) return false;
+                const holder = r.closest('label') || r.parentElement;
+                return /viaje\\s+solo\\s+ida/i.test(holder ? holder.innerText : '');
+            });
+        }"""))
+    except Exception:
+        return False
+
+
+def set_one_way(page):
+    open_departure_calendar(page)
+
+    # Preferred path: click Renfe's visible Lightpick label.
+    label = page.get_by_text(re.compile(r"^\\s*Viaje solo ida\\s*$", re.I))
+    for i in range(label.count()):
+        try:
+            if label.nth(i).is_visible():
+                label.nth(i).click(timeout=3000)
+                page.wait_for_timeout(300)
+                if one_way_is_selected(page):
+                    return
         except Exception:
             pass
 
+    # Fallback: activate the hidden Lightpick checkbox by the text of its container.
+    changed = page.evaluate("""() => {
+        const radios = [...document.querySelectorAll('input.lightpick__radio')];
+        for (const r of radios) {
+            const holder = r.closest('label') || r.parentElement;
+            const text = holder ? holder.innerText : '';
+            if (/viaje\\s+solo\\s+ida/i.test(text)) {
+                r.click();
+                r.dispatchEvent(new Event('change', {bubbles: true}));
+                return true;
+            }
+        }
+        return false;
+    }""")
+    page.wait_for_timeout(300)
+    if not changed or not one_way_is_selected(page):
+        raise RuntimeError("No pude activar 'Viaje solo ida' en el calendario de Renfe")
+
+
+def _click_target_day_if_visible(page, target):
+    payload = {"day": target.day, "month": target.month, "year": target.year}
+    return bool(page.evaluate("""(t) => {
+        const pad = n => String(n).padStart(2, '0');
+        const wantedIso = `${t.year}-${pad(t.month)}-${pad(t.day)}`;
+        const wantedEs = `${pad(t.day)}/${pad(t.month)}/${t.year}`;
+        const wantedMs = new Date(t.year, t.month - 1, t.day).getTime();
+        const cells = [...document.querySelectorAll('.lightpick__cell, .lightpick__day')];
+
+        // Best case: Renfe/Lightpick exposes an exact date attribute.
+        for (const c of cells) {
+            if (c.offsetParent === null) continue;
+            const attrs = [
+                c.getAttribute('data-date') || '',
+                c.getAttribute('aria-label') || '',
+                c.getAttribute('title') || '',
+                c.getAttribute('datetime') || ''
+            ].join(' ');
+            const dataTime = Number(c.getAttribute('data-time'));
+            if (attrs.includes(wantedIso) || attrs.includes(wantedEs) || dataTime === wantedMs) {
+                c.click();
+                return true;
+            }
+        }
+
+        // Fallback for the current visible target month.
+        const monthNames = ['enero','febrero','marzo','abril','mayo','junio',
+                            'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+        const calendar = document.querySelector('.lightpick') || document.body;
+        const calendarText = (calendar.innerText || '').toLowerCase();
+        if (!calendarText.includes(monthNames[t.month - 1]) || !calendarText.includes(String(t.year))) {
+            return false;
+        }
+        for (const c of cells) {
+            if (c.offsetParent === null) continue;
+            if ((c.textContent || '').trim() !== String(t.day)) continue;
+            const cls = String(c.className || '').toLowerCase();
+            if (cls.includes('disabled') || cls.includes('other-month')) continue;
+            c.click();
+            return true;
+        }
+        return false;
+    }""", payload))
+
+
+def verify_departure_date(page, target):
+    expected = target.strftime("%d/%m/%Y")
+    fields = [
+        page.locator('input[aria-label^="Fecha ida"]'),
+        page.locator('input[aria-label*="Fecha ida"]'),
+        page.locator('input.lightpick__field').first,
+    ]
+    seen = []
+    for loc in fields:
+        try:
+            for i in range(loc.count()):
+                item = loc.nth(i)
+                if not item.is_visible():
+                    continue
+                aria = item.get_attribute("aria-label") or ""
+                try:
+                    value = item.input_value()
+                except Exception:
+                    value = ""
+                seen.append(f"{aria} {value}".strip())
+                if expected in aria or expected in value:
+                    return
+        except Exception:
+            pass
+    raise RuntimeError(f"Renfe no dejó seleccionada la fecha {expected}. Valores vistos: {seen}")
+
+
+def set_date(page, iso_date):
+    target = datetime.strptime(iso_date, "%Y-%m-%d")
+    open_departure_calendar(page)
+
+    # Try the currently rendered month first, then advance month by month.
+    for _ in range(18):
+        if _click_target_day_if_visible(page, target):
+            page.wait_for_timeout(350)
+            verify_departure_date(page, target)
+            return
+
+        next_buttons = [
+            page.locator('.lightpick__next-action'),
+            page.locator('button[aria-label*="iguiente" i]'),
+            page.locator('button[title*="iguiente" i]'),
+        ]
+        advanced = False
+        for loc in next_buttons:
+            try:
+                for i in range(loc.count()):
+                    item = loc.nth(i)
+                    if item.is_visible():
+                        item.click(timeout=2500)
+                        page.wait_for_timeout(250)
+                        advanced = True
+                        break
+                if advanced:
+                    break
+            except Exception:
+                pass
+        if not advanced:
+            break
+
+    raise RuntimeError(f"No pude seleccionar fecha {iso_date}")
 
 def set_passengers(page, n):
     if n <= 1: return
@@ -179,8 +355,18 @@ def run():
             page.goto(RENFE_URL,wait_until="domcontentloaded",timeout=60000)
             close_cookies(page)
             print("Seleccionando trayecto...")
-            choose_station(page,"Origen",cfg["origin"]); choose_station(page,"Destino",cfg["destination"])
-            set_one_way(page); set_date(page,cfg["date"]); set_passengers(page,int(cfg["passengers"]))
+            choose_station(page,"Origen",cfg["origin"])
+            choose_station(page,"Destino",cfg["destination"])
+            close_cookies(page)
+            set_one_way(page)
+            set_date(page,cfg["date"])
+            set_passengers(page,int(cfg["passengers"]))
+
+            # Fail before searching if Renfe silently kept its default date/mode.
+            verify_departure_date(page, datetime.strptime(cfg["date"], "%Y-%m-%d"))
+            if not one_way_is_selected(page):
+                raise RuntimeError("Renfe no dejó activado 'Viaje solo ida'")
+
             print("Buscando billetes...")
             page.get_by_role("button",name=re.compile("Buscar billete",re.I)).first.click()
             page.wait_for_load_state("domcontentloaded",timeout=60000)
