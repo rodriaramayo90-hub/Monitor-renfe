@@ -292,6 +292,39 @@ def set_passengers(page, n):
         print("AVISO pasajeros:",e)
 
 
+def capture_form_state(page):
+    state = page.evaluate("""() => {
+        const forms = [...document.querySelectorAll('form')].map((form, idx) => ({
+            index: idx,
+            action: form.action || '',
+            method: (form.method || '').toUpperCase(),
+            id: form.id || '',
+            name: form.getAttribute('name') || '',
+            fields: [...form.querySelectorAll('input, select, textarea, button')].map(el => ({
+                tag: el.tagName,
+                type: el.type || '',
+                name: el.name || '',
+                id: el.id || '',
+                value: el.value ?? '',
+                checked: !!el.checked,
+                disabled: !!el.disabled,
+                ariaLabel: el.getAttribute('aria-label') || '',
+                className: el.className || '',
+                dataTime: el.getAttribute('data-time') || '',
+                text: (el.innerText || '').trim().slice(0, 120)
+            }))
+        }));
+        return forms;
+    }""")
+    DEBUG_DIR.mkdir(exist_ok=True)
+    (DEBUG_DIR / "form_state.json").write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    print("FORM_STATE:", json.dumps(state, ensure_ascii=False))
+    return state
+
+
 def parse_results_text(body,cfg):
     # Renfe result pages vary often. Work from rendered visible text instead of fragile CSS.
     time_re=re.compile(r"(?<!\d)([01]\d|2[0-3]):[0-5]\d(?:\s*h)?")
@@ -358,6 +391,27 @@ def run():
         browser=p.chromium.launch(headless=True)
         page=browser.new_page(viewport={"width":1440,"height":1000},locale="es-ES")
         page.set_default_timeout(15000)
+        captured_requests = []
+
+        def on_request(req):
+            try:
+                url = req.url
+                if "renfe" not in url.lower():
+                    return
+                item = {
+                    "method": req.method,
+                    "url": url,
+                    "resource_type": req.resource_type,
+                    "post_data": req.post_data,
+                }
+                captured_requests.append(item)
+                if req.method.upper() != "GET" or "venta.renfe.com" in url.lower():
+                    print("RENFE_REQUEST:", json.dumps(item, ensure_ascii=False))
+            except Exception as e:
+                print("AVISO captura request:", repr(e))
+
+        page.on("request", on_request)
+
         try:
             print("Abriendo Renfe...")
             page.goto(RENFE_URL,wait_until="domcontentloaded",timeout=60000)
@@ -375,6 +429,7 @@ def run():
             if not one_way_is_selected(page):
                 raise RuntimeError("Renfe no dejó activado 'Viaje solo ida'")
 
+            capture_form_state(page)
             print("Buscando billetes...")
             page.get_by_role("button",name=re.compile("Buscar billete",re.I)).first.click()
             page.wait_for_load_state("domcontentloaded",timeout=60000)
@@ -386,6 +441,10 @@ def run():
             page.wait_for_timeout(3000)
             body=page.locator("body").inner_text()
             print("Página de resultados cargada:",page.url)
+            (DEBUG_DIR / "requests.json").write_text(
+                json.dumps(captured_requests, ensure_ascii=False, indent=2),
+                encoding="utf-8"
+            )
             save_debug(page,body)
             if "Access Denied" in body or "403" in body[:500]:
                 raise RuntimeError("Renfe parece bloquear la IP del runner")
@@ -400,6 +459,10 @@ def run():
             print("ERROR:",repr(e))
             try:
                 body=page.locator("body").inner_text()
+                (DEBUG_DIR / "requests.json").write_text(
+                    json.dumps(captured_requests, ensure_ascii=False, indent=2),
+                    encoding="utf-8"
+                )
                 save_debug(page,body)
             except Exception: pass
             return 1
