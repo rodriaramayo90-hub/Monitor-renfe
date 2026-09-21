@@ -167,12 +167,9 @@ def _calendar_has_target_month(page, target):
 
 
 def _click_target_day_if_visible(page, target):
-    if not _calendar_has_target_month(page, target):
-        return False
-
     # Renfe Lightpick day cells expose the UTC-midnight timestamp in data-time.
-    # This is much safer than matching the visible day number because Renfe shows
-    # two months side by side.
+    # Search by that exact value. If the target month is not currently rendered,
+    # count() is zero and set_date() advances the calendar one month.
     target_ms = int(
         target.replace(tzinfo=timezone.utc).timestamp() * 1000
     )
@@ -180,7 +177,9 @@ def _click_target_day_if_visible(page, target):
     cell = page.locator(selector)
 
     try:
-        for i in range(cell.count()):
+        count = cell.count()
+        print("Buscando fecha:", selector, "coincidencias:", count)
+        for i in range(count):
             item = cell.nth(i)
             if not item.is_visible():
                 continue
