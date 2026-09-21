@@ -103,10 +103,19 @@ def parse_results_text(body,cfg):
         for t in times:
             if t not in unique: unique.append(t)
         if len(unique)<2: continue
-        dep,arr=unique[0],unique[1]
-        try:
-            if not (start<=mins(dep)<=end): continue
-        except Exception: continue
+        # A text window can contain more than one train. Pick the first time
+        # inside the requested departure range, then the next time as arrival.
+        dep_index=None
+        for j,t in enumerate(unique):
+            try:
+                if start<=mins(t)<=end:
+                    dep_index=j
+                    break
+            except Exception:
+                pass
+        if dep_index is None or dep_index+1>=len(unique):
+            continue
+        dep,arr=unique[dep_index],unique[dep_index+1]
         if not re.search(r"€|precio|plaza|disponible|completo|agotad|desde",window,re.I): continue
         price=None
         pm=re.search(r"(\d+(?:[.,]\d{1,2})?)\s*€",window)
