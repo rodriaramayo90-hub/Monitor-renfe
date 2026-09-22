@@ -2,6 +2,41 @@ name: Monitor Renfe
 
 on:
   workflow_dispatch:
+    inputs:
+      direction:
+        description: "Trayecto"
+        required: false
+        type: choice
+        default: "Sin cambiar"
+        options:
+          - "Sin cambiar"
+          - "OURENSE → A CORUÑA"
+          - "A CORUÑA → OURENSE"
+      date:
+        description: "Fecha (AAAA-MM-DD)"
+        required: false
+        type: string
+      time_from:
+        description: "Desde (HH:MM)"
+        required: false
+        type: string
+      time_to:
+        description: "Hasta (HH:MM)"
+        required: false
+        type: string
+      passengers:
+        description: "Pasajeros"
+        required: false
+        type: string
+      active:
+        description: "Estado del monitor"
+        required: false
+        type: choice
+        default: "Sin cambiar"
+        options:
+          - "Sin cambiar"
+          - "Activar"
+          - "Desactivar"
   push:
     branches:
       - main
@@ -27,6 +62,69 @@ jobs:
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
+      - name: Aplicar configuración elegida
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DIRECTION: ${{ inputs.direction }}
+          SEARCH_DATE: ${{ inputs.date }}
+          TIME_FROM: ${{ inputs.time_from }}
+          TIME_TO: ${{ inputs.time_to }}
+          PASSENGERS: ${{ inputs.passengers }}
+          ACTIVE: ${{ inputs.active }}
+        run: |
+          python - <<'PY'
+          import json, os, re
+          from datetime import datetime
+          from pathlib import Path
+
+          path = Path("config.json")
+          cfg = json.loads(path.read_text(encoding="utf-8"))
+
+          direction = os.getenv("DIRECTION", "").strip()
+          if direction == "OURENSE → A CORUÑA":
+              cfg["origin"], cfg["destination"] = "OURENSE", "A CORUÑA"
+          elif direction == "A CORUÑA → OURENSE":
+              cfg["origin"], cfg["destination"] = "A CORUÑA", "OURENSE"
+
+          date = os.getenv("SEARCH_DATE", "").strip()
+          if date:
+              datetime.strptime(date, "%Y-%m-%d")
+              cfg["date"] = date
+
+          for env_name, key in [("TIME_FROM", "time_from"), ("TIME_TO", "time_to")]:
+              value = os.getenv(env_name, "").strip()
+              if value:
+                  datetime.strptime(value, "%H:%M")
+                  cfg[key] = value
+
+          passengers = os.getenv("PASSENGERS", "").strip()
+          if passengers:
+              n = int(passengers)
+              if n < 1 or n > 9:
+                  raise ValueError("Pasajeros debe estar entre 1 y 9")
+              cfg["passengers"] = n
+
+          active = os.getenv("ACTIVE", "").strip()
+          if active == "Activar":
+              cfg["active"] = True
+          elif active == "Desactivar":
+              cfg["active"] = False
+
+          if cfg["time_from"] > cfg["time_to"]:
+              raise ValueError("La hora Desde no puede ser posterior a Hasta")
+
+          path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print("CONFIG ELEGIDA:", json.dumps(cfg, ensure_ascii=False))
+          PY
+
+          if ! git diff --quiet -- config.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add config.json
+            git commit -m "Update Renfe search configuration [skip ci]"
+            git push
+          fi
+
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
