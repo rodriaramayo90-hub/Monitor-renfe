@@ -3,7 +3,7 @@
   "origin": "OURENSE",
   "destination": "A CORUÑA",
   "date": "2026-09-23",
-  "time_from": "20:00",
-  "time_to": "23:00",
+  "time_from": "08:00",
+  "time_to": "10:00",
   "passengers": 1
 }
