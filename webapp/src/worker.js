@@ -1,5 +1,82 @@
 const REPO = "rodriaramayo90-hub/Monitor-renfe";
 const CONFIG_PATH = "config.json";
+const STATIONS = {
+  "OURENSE": "0071,22100,22100",
+  "A CORUÑA": "0071,31412,31412"
+};
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[ch]));
+}
+
+function buyHtml(u) {
+  const origin = (u.searchParams.get("origin") || "").toUpperCase();
+  const destination = (u.searchParams.get("destination") || "").toUpperCase();
+  const date = u.searchParams.get("date") || "";
+  const departure = u.searchParams.get("departure") || "00:00";
+  const passengers = Number(u.searchParams.get("passengers") || "1");
+
+  if (!STATIONS[origin] || !STATIONS[destination] || origin === destination) {
+    return {status:400, body:"Trayecto inválido"};
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return {status:400, body:"Fecha inválida"};
+  }
+  if (!/^\d{2}:\d{2}$/.test(departure)) {
+    return {status:400, body:"Hora inválida"};
+  }
+  if (!Number.isInteger(passengers) || passengers < 1 || passengers > 9) {
+    return {status:400, body:"Pasajeros inválidos"};
+  }
+
+  const [y,m,d] = date.split("-");
+  const renfeDate = `${d}/${m}/${y}`;
+  const fields = {
+    tipoBusqueda:"autocomplete",
+    currenLocation:"menuBusqueda",
+    vengoderenfecom:"SI",
+    desOrigen:origin,
+    desDestino:destination,
+    cdgoOrigen:STATIONS[origin],
+    cdgoDestino:STATIONS[destination],
+    idiomaBusqueda:"ES",
+    FechaIdaSel:renfeDate,
+    FechaVueltaSel:"",
+    _fechaIdaVisual:renfeDate,
+    _fechaVueltaVisual:"",
+    minPriceDeparture:"false",
+    minPriceReturn:"false",
+    adultos_:String(passengers),
+    ninos_:"0",
+    ninosMenores:"0",
+    codPromocional:"",
+    plazaH:"false",
+    sinEnlace:"false",
+    conMascota:"false",
+    conBicicleta:"false",
+    asistencia:"false",
+    franjaHoraI:departure,
+    franjaHoraV:"00:00",
+    Idioma:"es",
+    Pais:"ES"
+  };
+  const inputs = Object.entries(fields)
+    .map(([k,v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`)
+    .join("");
+
+  return {status:200, body:`<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Abriendo Renfe…</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f5f7fa;color:#172033;display:grid;place-items:center;min-height:100vh;padding:24px}.box{max-width:520px;background:#fff;border:1px solid #dde3ea;border-radius:18px;padding:28px;text-align:center;box-shadow:0 8px 30px #0000000a}button{border:0;border-radius:10px;padding:13px 20px;font-size:16px;font-weight:750;background:#5b2aa8;color:#fff;cursor:pointer}</style>
+</head><body><div class="box"><h1>🚆 Abriendo Renfe…</h1>
+<p>${esc(origin)} → ${esc(destination)} · ${esc(renfeDate)} · desde ${esc(departure)}</p>
+<form id="renfe" method="post" action="https://venta.renfe.com/vol/buscarTren.do?Idioma=es&Pais=ES">
+${inputs}<button type="submit">Continuar a Renfe</button></form>
+<script>document.getElementById("renfe").submit();</script>
+</div></body></html>`};
+}
 
 function html() {
   return `<!doctype html>
@@ -80,6 +157,10 @@ export default {
  async fetch(req, env) {
   const u=new URL(req.url);
   if(u.pathname==="/" && req.method==="GET") return new Response(html(),{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
+  if(u.pathname==="/buy" && req.method==="GET"){
+    const page=buyHtml(u);
+    return new Response(page.body,{status:page.status,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
+  }
   if(u.pathname!=="/api/config") return new Response("Not found",{status:404});
   if(!auth(req,env)) return Response.json({error:"PIN incorrecto"},{status:401});
   try{
