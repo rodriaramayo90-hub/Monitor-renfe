@@ -89,7 +89,7 @@ export default {
    if(req.method==="PUT"){
     const next=validate(await req.json());
     const content=btoa(unescape(encodeURIComponent(JSON.stringify(next,null,2)+"\n")));
-    await github(env,"PUT",{message:"Update Renfe search from web form [skip ci]",content,sha:file.sha,branch:"main"});
+    await github(env,"PUT",{message:"Update Renfe search from web form",content,sha:file.sha,branch:"main"});
     return Response.json(next);
    }
    return Response.json({error:"Método no permitido"},{status:405});
