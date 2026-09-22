@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright
 RENFE_URL = "https://www.renfe.com/es/es"
 CONFIG_PATH = Path("config.json")
 DEBUG_DIR = Path("debug")
+STATE_PATH = Path("state.json")
 
 
 def load_config():
@@ -486,16 +487,75 @@ def save_debug(page,body):
     (DEBUG_DIR/"page.html").write_text(page.content()[:500000],encoding="utf-8")
 
 
+def availability_key(cfg, train):
+    return "|".join([
+        cfg["origin"], cfg["destination"], cfg["date"],
+        str(cfg["passengers"]), train["departure"], train["arrival"]
+    ])
+
+
+def load_state(cfg):
+    query = {
+        "origin": cfg["origin"], "destination": cfg["destination"],
+        "date": cfg["date"], "time_from": cfg["time_from"],
+        "time_to": cfg["time_to"], "passengers": cfg["passengers"]
+    }
+    try:
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        if state.get("query") == query:
+            return state
+    except Exception:
+        pass
+    return {"query": query, "available": []}
+
+
+def save_state(cfg, trains):
+    query = {
+        "origin": cfg["origin"], "destination": cfg["destination"],
+        "date": cfg["date"], "time_from": cfg["time_from"],
+        "time_to": cfg["time_to"], "passengers": cfg["passengers"]
+    }
+    available = sorted(
+        availability_key(cfg, t) for t in trains if t["available"]
+    )
+    STATE_PATH.write_text(
+        json.dumps({"query": query, "available": available}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8"
+    )
+
+
 def notify(cfg,trains,results_url=None):
     topic=os.getenv("NTFY_TOPIC","").strip()
     if not topic:
-        print("NTFY_TOPIC no configurado: no se envían avisos todavía."); return
+        print("NTFY_TOPIC no configurado: no se envían avisos todavía.")
+        return
+
+    previous = set(load_state(cfg).get("available", []))
+    current = {availability_key(cfg,t) for t in trains if t["available"]}
+    new_keys = current - previous
+
+    print(f"Disponibles ahora: {len(current)} · nuevas disponibilidades: {len(new_keys)}")
     for t in trains:
-        if not t["available"]: continue
+        key = availability_key(cfg,t)
+        if not t["available"] or key not in new_keys:
+            continue
         msg=f"Hay plazas: {cfg['origin']} → {cfg['destination']}\n{cfg['date']} · {t['departure']} → {t['arrival']}\n{cfg['passengers']} pasajero(s)"
         if t["price"]: msg+=f" · {t['price']}"
-        requests.post(f"https://ntfy.sh/{topic}",data=msg.encode(),headers={"Title":"RENFE - PLAZAS DISPONIBLES","Priority":"5","Tags":"rotating_light,train","Click": results_url or RENFE_URL},timeout=15).raise_for_status()
+        requests.post(
+            f"https://ntfy.sh/{topic}",
+            data=msg.encode(),
+            headers={
+                "Title":"RENFE - PLAZAS DISPONIBLES",
+                "Priority":"5",
+                "Tags":"rotating_light,train",
+                "Click": results_url or RENFE_URL
+            },
+            timeout=15
+        ).raise_for_status()
 
+    # Store the complete current set. If a train disappears it is removed;
+    # if it later reappears, it becomes new again and triggers an alert.
+    save_state(cfg,trains)
 
 def run():
     cfg=load_config()
