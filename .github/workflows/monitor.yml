@@ -14,7 +14,7 @@ on:
     - cron: "*/5 * * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: renfe-monitor
@@ -41,6 +41,25 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python monitor.py
+      - name: Guardar estado anti-duplicados
+        if: success()
+        run: |
+          if [ -f state.json ] && ! git diff --quiet -- state.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "Update Renfe availability state"
+            git push
+          elif [ -f state.json ] && ! git ls-files --error-unmatch state.json >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "Initialize Renfe availability state"
+            git push
+          else
+            echo "Sin cambios de disponibilidad."
+          fi
+
       - name: Guardar diagnóstico
         if: always()
         uses: actions/upload-artifact@v4
