@@ -4,11 +4,13 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 import requests
 from playwright.sync_api import sync_playwright
 
 RENFE_URL = "https://www.renfe.com/es/es"
+PUBLIC_APP_URL = "https://monitor-renfe.rodriaramayo90.workers.dev"
 CONFIG_PATH = Path("config.json")
 DEBUG_DIR = Path("debug")
 STATE_PATH = Path("state.json")
@@ -524,7 +526,18 @@ def save_state(cfg, trains):
     )
 
 
-def notify(cfg,trains,results_url=None):
+def purchase_url(cfg, train):
+    params = urlencode({
+        "origin": cfg["origin"],
+        "destination": cfg["destination"],
+        "date": cfg["date"],
+        "passengers": cfg["passengers"],
+        "departure": train["departure"],
+    })
+    return f"{PUBLIC_APP_URL}/buy?{params}"
+
+
+def notify(cfg,trains):
     topic=os.getenv("NTFY_TOPIC","").strip()
     if not topic:
         print("NTFY_TOPIC no configurado: no se envían avisos todavía.")
@@ -548,7 +561,7 @@ def notify(cfg,trains,results_url=None):
                 "Title":"RENFE - PLAZAS DISPONIBLES",
                 "Priority":"5",
                 "Tags":"rotating_light,train",
-                "Click": results_url or RENFE_URL
+                "Click": purchase_url(cfg, t)
             },
             timeout=15
         ).raise_for_status()
@@ -645,7 +658,7 @@ def run():
             if not trains:
                 print("DIAGNOSTICO: 0 trenes. Se adjuntan results.png, page.txt y page.html.")
                 # A zero result is suspicious for this route/test and should be inspectable.
-            notify(cfg,trains,page.url)
+            notify(cfg,trains)
             return 0
         except Exception as e:
             print("ERROR:",repr(e))
