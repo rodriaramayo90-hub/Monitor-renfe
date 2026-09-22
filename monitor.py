@@ -486,7 +486,7 @@ def save_debug(page,body):
     (DEBUG_DIR/"page.html").write_text(page.content()[:500000],encoding="utf-8")
 
 
-def notify(cfg,trains):
+def notify(cfg,trains,results_url=None):
     topic=os.getenv("NTFY_TOPIC","").strip()
     if not topic:
         print("NTFY_TOPIC no configurado: no se envían avisos todavía."); return
@@ -494,7 +494,7 @@ def notify(cfg,trains):
         if not t["available"]: continue
         msg=f"Hay plazas: {cfg['origin']} → {cfg['destination']}\n{cfg['date']} · {t['departure']} → {t['arrival']}\n{cfg['passengers']} pasajero(s)"
         if t["price"]: msg+=f" · {t['price']}"
-        requests.post(f"https://ntfy.sh/{topic}",data=msg.encode(),headers={"Title":"RENFE - PLAZAS DISPONIBLES","Priority":"5","Tags":"rotating_light,train","Click":RENFE_URL},timeout=15).raise_for_status()
+        requests.post(f"https://ntfy.sh/{topic}",data=msg.encode(),headers={"Title":"RENFE - PLAZAS DISPONIBLES","Priority":"5","Tags":"rotating_light,train","Click": results_url or RENFE_URL},timeout=15).raise_for_status()
 
 
 def run():
@@ -585,7 +585,7 @@ def run():
             if not trains:
                 print("DIAGNOSTICO: 0 trenes. Se adjuntan results.png, page.txt y page.html.")
                 # A zero result is suspicious for this route/test and should be inspectable.
-            notify(cfg,trains)
+            notify(cfg,trains,page.url)
             return 0
         except Exception as e:
             print("ERROR:",repr(e))
