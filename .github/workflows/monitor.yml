@@ -13,7 +13,7 @@ on:
           - "OURENSE → A CORUÑA"
           - "A CORUÑA → OURENSE"
       date:
-        description: "Fecha (AAAA-MM-DD)"
+        description: "Fecha (DD/MM/AAAA o AAAA-MM-DD)"
         required: false
         type: string
       time_from:
@@ -88,8 +88,16 @@ jobs:
 
           date = os.getenv("SEARCH_DATE", "").strip()
           if date:
-              datetime.strptime(date, "%Y-%m-%d")
-              cfg["date"] = date
+              parsed = None
+              for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+                  try:
+                      parsed = datetime.strptime(date, fmt)
+                      break
+                  except ValueError:
+                      pass
+              if parsed is None:
+                  raise ValueError("Fecha inválida. Usa DD/MM/AAAA o AAAA-MM-DD")
+              cfg["date"] = parsed.strftime("%Y-%m-%d")
 
           for env_name, key in [("TIME_FROM", "time_from"), ("TIME_TO", "time_to")]:
               value = os.getenv(env_name, "").strip()
