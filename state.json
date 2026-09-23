@@ -2,17 +2,13 @@
   "query": {
     "origin": "OURENSE",
     "destination": "A CORUÑA",
-    "date": "2026-09-25",
-    "time_from": "21:00",
-    "time_to": "23:00",
+    "date": "2026-09-24",
+    "time_from": "09:10",
+    "time_to": "11:00",
     "passengers": 1
   },
   "available": [
-    "OURENSE|A CORUÑA|2026-09-25|1|21:01|22:45",
-    "OURENSE|A CORUÑA|2026-09-25|1|21:01|22:45",
-    "OURENSE|A CORUÑA|2026-09-25|1|21:40|22:54",
-    "OURENSE|A CORUÑA|2026-09-25|1|21:40|22:54",
-    "OURENSE|A CORUÑA|2026-09-25|1|22:46|23:59",
-    "OURENSE|A CORUÑA|2026-09-25|1|22:46|23:59"
+    "OURENSE|A CORUÑA|2026-09-24|1|09:17|10:33",
+    "OURENSE|A CORUÑA|2026-09-24|1|09:55|11:08"
   ]
 }
