@@ -1,9 +1,9 @@
 {
   "active": true,
-  "origin": "OURENSE",
-  "destination": "A CORUÑA",
-  "date": "2026-09-24",
-  "time_from": "09:10",
-  "time_to": "11:00",
+  "origin": "A CORUÑA",
+  "destination": "OURENSE",
+  "date": "2026-09-29",
+  "time_from": "19:00",
+  "time_to": "20:00",
   "passengers": 1
 }
