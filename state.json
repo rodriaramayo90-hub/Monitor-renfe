@@ -1,14 +1,29 @@
 {
   "query": {
-    "origin": "OURENSE",
-    "destination": "A CORUÑA",
-    "date": "2026-09-24",
-    "time_from": "09:10",
-    "time_to": "11:00",
+    "origin": "A CORUÑA",
+    "destination": "OURENSE",
+    "date": "2026-09-29",
+    "time_from": "01:00",
+    "time_to": "23:00",
     "passengers": 1
   },
   "available": [
-    "OURENSE|A CORUÑA|2026-09-24|1|09:17|10:33",
-    "OURENSE|A CORUÑA|2026-09-24|1|09:55|11:08"
+    "A CORUÑA|OURENSE|2026-09-29|1|05:14|06:21",
+    "A CORUÑA|OURENSE|2026-09-29|1|05:14|06:21",
+    "A CORUÑA|OURENSE|2026-09-29|1|06:00|07:13",
+    "A CORUÑA|OURENSE|2026-09-29|1|07:05|10:49",
+    "A CORUÑA|OURENSE|2026-09-29|1|07:10|08:17",
+    "A CORUÑA|OURENSE|2026-09-29|1|07:10|08:17",
+    "A CORUÑA|OURENSE|2026-09-29|1|07:45|08:56",
+    "A CORUÑA|OURENSE|2026-09-29|1|10:00|11:13",
+    "A CORUÑA|OURENSE|2026-09-29|1|11:15|12:22",
+    "A CORUÑA|OURENSE|2026-09-29|1|13:35|14:48",
+    "A CORUÑA|OURENSE|2026-09-29|1|15:08|16:21",
+    "A CORUÑA|OURENSE|2026-09-29|1|15:54|17:01",
+    "A CORUÑA|OURENSE|2026-09-29|1|15:54|17:01",
+    "A CORUÑA|OURENSE|2026-09-29|1|17:15|18:28",
+    "A CORUÑA|OURENSE|2026-09-29|1|18:00|20:28",
+    "A CORUÑA|OURENSE|2026-09-29|1|19:33|20:40",
+    "A CORUÑA|OURENSE|2026-09-29|1|21:00|22:13"
   ]
 }
